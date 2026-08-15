@@ -68,5 +68,6 @@ assert.equal(typeof share.settings.update, "function");
 assert.equal(typeof share.settings.subscribe, "function");
 assert.equal(typeof share.timers.setTimeout, "function");
 assert.equal(typeof share.timers.setInterval, "function");
+assert.ok("sessions" in share, "注入份额应包含 sessions 服务引用");
 
 console.log("client wiring tests passed");
