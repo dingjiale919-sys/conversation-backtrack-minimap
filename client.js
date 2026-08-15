@@ -501,7 +501,14 @@ window.__ModuleLoader__.load({
           return;
         }
         const rows = this.column.querySelectorAll(SELECTORS.row);
-        if (this.debugN++ < 8) console.log("[backtrack-minimap][geo] rescan: 行数=" + rows.length);
+        if (this.debugN++ < 8) {
+          const head = Array.from(rows).slice(0, 2).map((r) => (r.getAttribute("data-chat-anchor-key") || "").slice(0, 14));
+          const tail = Array.from(rows).slice(-2).map((r) => (r.getAttribute("data-chat-anchor-key") || "").slice(0, 14));
+          console.log(
+            "[backtrack-minimap][geo] rescan: 行数=" + rows.length +
+              "，DOM头=" + JSON.stringify(head) + "，DOM尾=" + JSON.stringify(tail)
+          );
+        }
         const seen = new Set();
         for (const row of rows) {
           const key = row.getAttribute("data-chat-anchor-key");
