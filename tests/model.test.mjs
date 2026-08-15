@@ -85,7 +85,7 @@ function node(key, kind, data, extra) {
 
 // ── lengthPct：回答越长线越长、封顶 ──
 {
-  assert.equal(model.lengthPct({ role: "user", chars: 9999 }), 40);
+  assert.equal(model.lengthPct({ role: "user", chars: 9999 }), 100);
   const s = model.lengthPct({ role: "assistant", chars: 10 });
   const l = model.lengthPct({ role: "assistant", chars: 10000 });
   assert.ok(l > s, "长回答的线应更长");

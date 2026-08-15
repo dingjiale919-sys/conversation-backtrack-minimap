@@ -236,7 +236,7 @@ window.__ModuleLoader__.load({
     function lengthPct(entry) {
       switch (entry.role) {
         case "user":
-          return 40;
+          return 100;
         case "assistant":
           return clamp(62 + Math.round(10 * Math.log10(1 + (entry.chars || 0))), 62, 100);
         case "context":
@@ -734,8 +734,10 @@ window.__ModuleLoader__.load({
         const entry = st.entries[row.start];
         const group = row.count > 1;
         const isTool = !group && entry && entry.role === "tool";
+        const isUser = !group && entry && entry.role === "user";
         const widthPct = group ? 80 : lengthPct(entry || { role: "system", chars: 0 });
-        const h = isTool ? 4 : group ? 4 : 2;
+        // 用户消息 3px 粗更显眼；其余保持 2px（工具点/合并组 4px）。
+        const h = isTool ? 4 : group ? 4 : isUser ? 3 : 2;
         const style = {
           position: "absolute",
           height: h + "px",
@@ -931,7 +933,7 @@ window.__ModuleLoader__.load({
       function rowAt(clientY) {
         const rect = rail.getBoundingClientRect();
         for (const row of st.display) {
-          if (Math.abs(clientY - (rect.top + row.y)) <= 4) return row;
+          if (Math.abs(clientY - (rect.top + row.y)) <= 6) return row;
         }
         return null;
       }
