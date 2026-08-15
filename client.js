@@ -19,6 +19,7 @@ window.__ModuleLoader__.load({
     var exports = module.exports;
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     const React = require("react");
+    if (typeof console !== "undefined") console.log("[backtrack-minimap] bundle 已材质化");
 
     const NS = "conversationBacktrackMinimap";
     const inject = ["slots", "locale"];
@@ -726,6 +727,7 @@ window.__ModuleLoader__.load({
         }
         band.style.top = "0px";
         updateBand();
+        if (st.onRowsChanged) st.onRowsChanged(st.rowEls.size);
       }
 
       function layout() {
@@ -1003,6 +1005,11 @@ window.__ModuleLoader__.load({
     /** 输入栏槽位条目：本身不渲染可见内容，只负责创建/销毁命令式时间轴。 */
     function RailEntry(props) {
       const { sessionId, useSession, t, settings } = props;
+      // 设置是 store 对象：用 useSyncExternalStore 取当前值快照。
+      const values =
+        settings && typeof settings.get === "function"
+          ? React.useSyncExternalStore(settings.subscribe, settings.get)
+          : { ...DEFAULTS };
       const snapshot = typeof useSession === "function" ? useSession((s) => (s ? s.chat : null)) : null;
       // 用 order 签名（长度+首尾 key）作 memo 依赖：流式期间内容变化不重算索引，
       // 只有节点增删（含 loadOlder 在头部追加）才重建条目列表。
@@ -1017,39 +1024,67 @@ window.__ModuleLoader__.load({
       const railRef = React.useRef(null);
       const [unsupported, setUnsupported] = React.useState(false);
 
+      // 自检徽标状态：red=注册/挂载失败、amber=锚点缺失、blue=已挂载但无消息行、
+      // green=时间轴运行中、gray=设置关闭。
+      const [badge, setBadge] = React.useState("red");
+
       React.useEffect(() => {
-        if (settings.enabled === false) return;
+        if (values.enabled === false) {
+          setBadge("gray");
+          console.log("[backtrack-minimap] 设置关闭，跳过挂载");
+          return;
+        }
         const host = rootRef.current;
-        if (!host) return;
+        if (!host) {
+          console.log("[backtrack-minimap] 占位元素未挂载");
+          setBadge("red");
+          return;
+        }
         const scrollport = host.closest(SELECTORS.scroll);
         if (!scrollport) {
+          console.log("[backtrack-minimap] 未找到滚动容器 " + SELECTORS.scroll, host);
           setUnsupported(true);
+          setBadge("amber");
           return;
         }
         setUnsupported(false);
-        const rail = createRail({
-          scrollport,
-          settings,
-          t,
-          getSnapshot: () => snapshotRef.current,
-        });
+        console.log("[backtrack-minimap] 滚动容器已找到，创建时间轴", scrollport);
+        let rail = null;
+        try {
+          rail = createRail({
+            scrollport,
+            settings: values,
+            t,
+            getSnapshot: () => snapshotRef.current,
+          });
+        } catch (err) {
+          console.error("[backtrack-minimap] createRail 失败", err);
+          setBadge("red");
+          return;
+        }
         rail.setEntries(entries);
         railRef.current = rail;
+        setBadge("blue");
+        // 行出现后升为 green：由 rail 的 onRowsChanged 回调触发。
+        rail.onRowsChanged = (count) => {
+          if (count > 0) setBadge("green");
+          else setBadge("blue");
+        };
         return () => {
           railRef.current = null;
           rail.dispose();
         };
       }, [
         sessionId,
-        settings.enabled,
-        settings.side,
-        settings.width,
-        settings.showToolCalls,
-        settings.smoothScroll,
-        settings.showHoverPreview,
-        settings.density,
-        settings.prevKey,
-        settings.nextKey,
+        values.enabled,
+        values.side,
+        values.width,
+        values.showToolCalls,
+        values.smoothScroll,
+        values.showHoverPreview,
+        values.density,
+        values.prevKey,
+        values.nextKey,
       ]);
 
       React.useEffect(() => {
@@ -1057,19 +1092,33 @@ window.__ModuleLoader__.load({
         if (rail) rail.setEntries(entries);
       }, [entries]);
 
-      if (unsupported) {
-        return React.createElement("span", {
-          title: t("unsupportedHint"),
-          style: {
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "var(--dsw-alias-state-warn-label)",
-            alignSelf: "center",
-          },
-        });
-      }
-      return React.createElement("span", { ref: rootRef, style: { display: "none" } });
+      const colors = {
+        red: "var(--dsw-alias-state-error-primary)",
+        amber: "var(--dsw-alias-state-warn-label)",
+        blue: "var(--dsw-alias-state-business-primary)",
+        green: "#22c55e",
+        gray: "var(--dsw-alias-label-caption)",
+      };
+      const titles = {
+        red: "[backtrack-minimap] 挂载失败（见控制台）",
+        amber: t("unsupportedHint"),
+        blue: "[backtrack-minimap] 已挂载，等待消息行",
+        green: "[backtrack-minimap] 运行中",
+        gray: "[backtrack-minimap] 已关闭",
+      };
+      return React.createElement("span", {
+        ref: rootRef,
+        title: titles[badge] || "",
+        style: {
+          display: "inline-block",
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: colors[badge] || colors.red,
+          alignSelf: "center",
+          flex: "none",
+        },
+      });
     }
 
     /** 设置页（settings.section）。 */
@@ -1200,37 +1249,52 @@ window.__ModuleLoader__.load({
     // ═══════════════════════════ 注册 ═══════════════════════════
 
     function apply(ctx) {
-      ctx.effect(() => ctx.locale.register(NS, { zh, en }), "conversation-backtrack-minimap: dictionaries");
+      console.log("[backtrack-minimap] apply 开始，注入服务：", inject);
+      try {
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), "conversation-backtrack-minimap: dictionaries");
+      } catch (err) {
+        console.error("[backtrack-minimap] locale 注册失败", err);
+      }
       const t = ctx.locale.bind(NS);
       const injected = () => ({ t, settings: settingsStore });
 
-      ctx.slots.inject("settings.section", () =>
-        ctx.slots.register(
-          {
-            name: "settings.section",
-            id: "conversation-backtrack-minimap",
-            order: 50,
-            label: () => t("settingsNav"),
-            locale: NS,
-            inject: injected,
-          },
-          SettingsPage
-        )
-      );
+      try {
+        ctx.slots.inject("settings.section", () =>
+          ctx.slots.register(
+            {
+              name: "settings.section",
+              id: "conversation-backtrack-minimap",
+              order: 50,
+              label: () => t("settingsNav"),
+              locale: NS,
+              inject: injected,
+            },
+            SettingsPage
+          )
+        );
+        console.log("[backtrack-minimap] settings.section 已注册");
+      } catch (err) {
+        console.error("[backtrack-minimap] settings.section 注册失败", err);
+      }
 
-      ctx.slots.inject("conversation.input.right", () =>
-        ctx.slots.register(
-          {
-            name: "conversation.input.right",
-            id: "conversation-backtrack-minimap-rail",
-            order: 10,
-            label: () => t("railLabel"),
-            locale: NS,
-            inject: injected,
-          },
-          RailEntry
-        )
-      );
+      try {
+        ctx.slots.inject("conversation.input.right", () =>
+          ctx.slots.register(
+            {
+              name: "conversation.input.right",
+              id: "conversation-backtrack-minimap-rail",
+              order: 10,
+              label: () => t("railLabel"),
+              locale: NS,
+              inject: injected,
+            },
+            RailEntry
+          )
+        );
+        console.log("[backtrack-minimap] conversation.input.right 已注册");
+      } catch (err) {
+        console.error("[backtrack-minimap] conversation.input.right 注册失败", err);
+      }
     }
 
     exports.NS = NS;
