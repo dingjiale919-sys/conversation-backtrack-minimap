@@ -764,11 +764,13 @@ window.__ModuleLoader__.load({
         const gap = st.settings.density === "aggressive" ? 6 : st.settings.density === "adaptive" ? 3 : 0;
         const railH = rail.clientHeight || 1;
         const extent = Math.max(1, st.scrollport.scrollHeight - st.scrollport.clientHeight);
-        // 工具显隐与隐藏占位在渲染层处理：保留原始条目索引，只跳过显示。
+        // 显示过滤（保留原始条目索引，只跳过显示）：
+        // 隐藏占位、系统角色（压缩/命令/错误/轮尾等灰色短线）与可选的工具节点。
         const vis = [];
         for (let i = 0; i < st.entries.length; i++) {
           const e = st.entries[i];
           if (e.hidden) continue;
+          if (e.role === "system") continue;
           if (e.role === "tool" && st.settings.showToolCalls === false) continue;
           vis.push(i);
         }
