@@ -1,6 +1,6 @@
 {
   "name": "conversation-backtrack-minimap",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness plugin: 长对话左侧回溯时间轴（minimap）——按消息真实位置排列的缩略导轨、悬停预览、点击跳转、视口同步高亮",
   "license": "MIT",
   "keywords": [

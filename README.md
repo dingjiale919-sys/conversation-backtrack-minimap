@@ -8,14 +8,21 @@ It is a navigation tool only — not long-term memory, RAG, summarization, or br
 
 ## Features
 
-- **Message rail**: user = short bright line; assistant = longer line (longer for longer answers); tool calls = dots; merged dense nodes = muted bars; the current viewport is marked with a bright band
+- **Message rail**: user = full-width bright 3px bars; assistant = longer blue lines (longer for longer answers); tool calls = orange dots; dense nodes merge into muted thick groups (hover to expand); system roles (compaction/command/error/turn-tail) are hidden; the current viewport is marked with a bright band
 - **Hover preview**: dark rounded popover with role, turn, time, and the first 150 characters; clamped to the window edges
-- **Click to jump**: smooth-scrolls the target message to the viewport center (sticky headers compensated), flashes it for 1.5 s; clicking empty rail space jumps proportionally
-- **Scroll sync**: passive scroll + requestAnimationFrame throttling; in-view rows brighten; programmatic and user scrolling never feed back into each other
+- **Click to jump**: smooth-scrolls the target message to the exact viewport center (content-origin offset and sticky headers compensated), flashes it for 1.5 s; clicking empty rail space jumps proportionally
+- **Scroll sync**: passive scroll + rAF throttling; in-view rows brighten; programmatic and user scrolling never feed back into each other
 - **Turn shortcuts**: `Alt+ArrowUp` / `Alt+ArrowDown` for previous/next turn (configurable)
 - **Live updates**: streaming, new messages, tool start/end, code folding, image loads, session switches, reloads, and "load older" are all handled incrementally — the rail is never rebuilt per token
-- **Performance**: ~1.3 ms to derive the 1000-message index (recomputed only when nodes are added/removed); geometry updates use ResizeObserver plus incremental prefix sums, only affected rows shift
+- **Performance**: ~1.5 ms to derive the 1000-message index (recomputed only when nodes are added/removed); geometry updates use ResizeObserver plus incremental prefix sums, only affected rows shift
 - **Privacy**: all indexing is local; no network, no telemetry, no message mutation, no request interception
+
+## Acceptance record (v0.2.0, 2026-08-15)
+
+- Environment: DSH 0.1.0-rc.6, default web profile, verified on a live session with 110+ messages
+- Verified item by item: rail rendering (user/assistant/tool/merged groups), hover preview, centered click-jump with 1.5 s flash, proportional blank-click jump, scroll-sync band, `Alt+↑/↓` turn navigation, streaming append, session-switch cleanup, reload restore, settings page live-apply
+- Sandbox compliance: dynamic packages cannot use browser `setTimeout/setInterval/fetch`; this plugin declares `inject: ['timer']` and uses the `ctx` timer service. Session data comes from the `sessions` service (`Slot` prop `useSession` fallback); entries are aligned to DOM row order, with hidden placeholders for keys missing from the snapshot
+- Performance measured (node micro-benchmark, 1000 messages): entriesOf 1.49 ms, displayRows 0.02 ms, indexAt ~0 ms, full prefix sum 0.004 ms
 
 ## Install
 
