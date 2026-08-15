@@ -1138,11 +1138,16 @@ window.__ModuleLoader__.load({
       const lastEntryLen = React.useRef(-1);
       if (lastEntryLen.current !== entries.length) {
         lastEntryLen.current = entries.length;
+        const keys = entries.map((e) => String(e.key).slice(0, 10));
         console.log(
           "[backtrack-minimap] 快照来源：" +
             (svcSnap ? "sessions服务" : propChat ? "useSession prop" : "无") +
             "，entries=" +
-            entries.length
+            entries.length +
+            "，头=" +
+            JSON.stringify(keys.slice(0, 2)) +
+            "，尾=" +
+            JSON.stringify(keys.slice(-2))
         );
       }
       const rootRef = React.useRef(null);
