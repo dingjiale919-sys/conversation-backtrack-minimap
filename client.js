@@ -1083,7 +1083,12 @@ window.__ModuleLoader__.load({
         try {
           const binding = sessions.binding(sessionId);
           face = binding ? binding.session : null;
-        } catch {
+          console.log(
+            "[backtrack-minimap][snap] binding(" + String(sessionId).slice(0, 12) + ") → " +
+              (face ? "face 已取得" : "无 face")
+          );
+        } catch (err) {
+          console.log("[backtrack-minimap][snap] binding 抛错", err);
           face = null;
         }
         if (!face) {
@@ -1091,9 +1096,15 @@ window.__ModuleLoader__.load({
           return;
         }
         try {
-          setSnap(face.getSnapshot());
+          const first = face.getSnapshot();
+          console.log(
+            "[backtrack-minimap][snap] 快照 chat.order 长度=" +
+              (first && first.chat && first.chat.order ? first.chat.order.length : "无")
+          );
+          setSnap(first);
           return face.subscribe(() => setSnap(face.getSnapshot()));
-        } catch {
+        } catch (err) {
+          console.log("[backtrack-minimap][snap] 快照读取抛错", err);
           setSnap(null);
         }
       }, [sessions, sessionId]);
@@ -1108,7 +1119,9 @@ window.__ModuleLoader__.load({
         settings && typeof settings.get === "function"
           ? React.useSyncExternalStore(settings.subscribe, settings.get)
           : { ...DEFAULTS };
-      const currentId = typeof useSessions === "function" ? useSessions((s) => (s ? s.current : sessionId)) : sessionId;
+      // 优先用槽位 props 的 sessionId（窗格所属会话），列表 current 只作兜底。
+      const listCurrent = typeof useSessions === "function" ? useSessions((s) => (s ? s.current : undefined)) : undefined;
+      const currentId = sessionId || listCurrent;
       const svcSnap = useSessionSnapshot(sessions, currentId);
       // 优先 sessions 服务路径；不可用时回退槽位标准 prop useSession。
       const propChat = typeof useSession === "function" ? useSession((s) => (s ? s.chat : null)) : null;
