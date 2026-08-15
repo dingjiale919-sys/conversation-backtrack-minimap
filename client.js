@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     if (typeof console !== "undefined") console.log("[backtrack-minimap] bundle 已材质化");
 
     const NS = "conversationBacktrackMinimap";
-    const inject = ["slots", "locale"];
+    const inject = ["slots", "locale", "timer"];
     const STORE_KEY = "conversation-backtrack-minimap.settings.v1";
     const PREVIEW_CHARS = 150;
     const FLASH_MS = 1500;
@@ -424,18 +424,23 @@ window.__ModuleLoader__.load({
      * 新行），行高进前缀和 tops；行高不变的行完全不参与重算。
      */
     class GeometryTracker {
-      constructor(scrollport) {
+      constructor(scrollport, timers) {
         this.scrollport = scrollport;
+        this.timers = timers || {
+          setTimeout: (cb) => cb(),
+          setInterval: () => 0,
+        };
         this.heights = new Map(); // key → height
         this.rowEls = new Map(); // key → element
         this.order = []; // DOM 顺序的 key 列表
         this.tops = [];
         this.total = 0;
-        this.raf = null;
         this.mo = null;
         this.ro = null;
         this.column = null;
         this.onChange = null;
+        this.pollDisposer = null;
+        this.debugN = 0;
       }
 
       start(onChange) {
@@ -466,18 +471,21 @@ window.__ModuleLoader__.load({
         this.ro = new ResizeObserver((entries) => this.applyRO(entries));
         this.rescan();
         // 自愈兜底：若一直没发现行（时序未知），每秒重扫一次，找到即停。
-        this.pollTimer = setInterval(() => {
-          if (this.rowEls.size > 0) {
-            clearInterval(this.pollTimer);
-            this.pollTimer = null;
-            return;
-          }
-          dbg("轮询重扫（仍未发现行）");
-          this.rescan();
-        }, 1000);
-        if (this.pollTimer) {
-          const t = this.pollTimer;
-          setTimeout(() => clearInterval(t), 60000);
+        // 计时器走沙箱允许的 timer 服务（ctx.setInterval），禁用浏览器全局。
+        try {
+          this.pollDisposer = this.timers.setInterval(() => {
+            if (this.rowEls.size > 0) {
+              if (this.pollDisposer && typeof this.pollDisposer === "function") {
+                try { this.pollDisposer(); } catch { /* 忽略 */ }
+              }
+              this.pollDisposer = null;
+              return;
+            }
+            dbg("轮询重扫（仍未发现行）");
+            this.rescan();
+          }, 1000);
+        } catch (err) {
+          console.log("[backtrack-minimap][geo] 轮询计时器不可用，跳过", err);
         }
       }
 
@@ -531,12 +539,9 @@ window.__ModuleLoader__.load({
       }
 
       schedule() {
-        if (this.raf) return;
-        this.raf = requestAnimationFrame(() => {
-          this.raf = null;
-          this.recompute();
-          if (this.onChange) this.onChange();
-        });
+        // 同步调度：前缀和重算微秒级，避免依赖可能被沙箱拦截的 rAF。
+        this.recompute();
+        if (this.onChange) this.onChange();
       }
 
       recompute() {
@@ -551,9 +556,13 @@ window.__ModuleLoader__.load({
       }
 
       stop() {
-        if (this.pollTimer) {
-          clearInterval(this.pollTimer);
-          this.pollTimer = null;
+        if (this.pollDisposer) {
+          try {
+            this.pollDisposer();
+          } catch {
+            /* 忽略 */
+          }
+          this.pollDisposer = null;
         }
         if (this.mo) this.mo.disconnect();
         if (this.ro) this.ro.disconnect();
@@ -645,7 +654,11 @@ window.__ModuleLoader__.load({
         settings: opts.settings,
         t: opts.t,
         getSnapshot: opts.getSnapshot || (() => null),
-        tracker: new GeometryTracker(opts.scrollport),
+        timers: opts.timers || {
+          setTimeout: () => 0,
+          setInterval: () => 0,
+        },
+        tracker: new GeometryTracker(opts.scrollport, opts.timers),
         guard: createScrollGuard(),
         scrollRaf: null,
         pointerRaf: null,
@@ -656,6 +669,18 @@ window.__ModuleLoader__.load({
         rowEls: new Map(),
         resizeObserver: null,
         railW: opts.settings.width || 10,
+      };
+      // rAF 调度带同步回退（沙箱环境 rAF 不可用也不阻塞交互）。
+      const scheduleRaf = (cb) => {
+        try {
+          if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(cb);
+            return;
+          }
+        } catch {
+          /* 回退 */
+        }
+        cb();
       };
 
       const rail = (st.rail = document.createElement("div"));
@@ -760,6 +785,15 @@ window.__ModuleLoader__.load({
 
       function layout() {
         if (st.disposed) return;
+        if (!st.layoutLogs) st.layoutLogs = 0;
+        if (st.layoutLogs++ < 5) {
+          console.log(
+            "[backtrack-minimap][geo] layout: rows=" +
+              st.tracker.rowEls.size +
+              " entries=" +
+              st.entries.length
+          );
+        }
         const sr = st.scrollport.getBoundingClientRect();
         const composer = st.scrollport.querySelector(SELECTORS.composer);
         const cr = composer ? composer.getBoundingClientRect() : null;
@@ -834,7 +868,8 @@ window.__ModuleLoader__.load({
 
       function onScroll() {
         if (st.scrollRaf) return;
-        st.scrollRaf = requestAnimationFrame(() => {
+        st.scrollRaf = true;
+        scheduleRaf(() => {
           st.scrollRaf = null;
           updateBand();
           hidePreview();
@@ -853,9 +888,13 @@ window.__ModuleLoader__.load({
         const prev = el.style.boxShadow;
         el.style.transition = "box-shadow .15s ease";
         el.style.boxShadow = "0 0 0 3px var(--dsw-alias-state-business-primary)";
-        window.setTimeout(() => {
+        try {
+          st.timers.setTimeout(() => {
+            el.style.boxShadow = prev;
+          }, FLASH_MS);
+        } catch {
           el.style.boxShadow = prev;
-        }, FLASH_MS);
+        }
       }
 
       function jumpTo(index) {
@@ -948,7 +987,8 @@ window.__ModuleLoader__.load({
 
       function onPointerMove(e) {
         if (st.pointerRaf) return;
-        st.pointerRaf = requestAnimationFrame(() => {
+        st.pointerRaf = true;
+        scheduleRaf(() => {
           st.pointerRaf = null;
           const row = rowAt(e.clientY);
           if (row) renderPreview(e.clientX, e.clientY, row);
@@ -1033,7 +1073,7 @@ window.__ModuleLoader__.load({
 
     /** 输入栏槽位条目：本身不渲染可见内容，只负责创建/销毁命令式时间轴。 */
     function RailEntry(props) {
-      const { sessionId, useSession, t, settings } = props;
+      const { sessionId, useSession, t, settings, timers } = props;
       // 设置是 store 对象：用 useSyncExternalStore 取当前值快照。
       const values =
         settings && typeof settings.get === "function"
@@ -1084,6 +1124,7 @@ window.__ModuleLoader__.load({
             scrollport,
             settings: values,
             t,
+            timers,
             getSnapshot: () => snapshotRef.current,
           });
         } catch (err) {
@@ -1277,15 +1318,47 @@ window.__ModuleLoader__.load({
 
     // ═══════════════════════════ 注册 ═══════════════════════════
 
+    /** 从 ctx 安全取得沙箱允许的计时器（timer 服务已声明在 inject 里）。 */
+    function makeTimers(ctx) {
+      const wrap = (name, fallback) => {
+        try {
+          const fn = ctx[name];
+          if (typeof fn === "function") return (cb, ms) => fn.call(ctx, cb, ms);
+        } catch {
+          /* 继续回退 */
+        }
+        return fallback;
+      };
+      const nat = (cb, ms) => {
+        try {
+          return window.setTimeout(cb, ms);
+        } catch {
+          return 0;
+        }
+      };
+      const nint = (cb, ms) => {
+        try {
+          return window.setInterval(cb, ms);
+        } catch {
+          return 0;
+        }
+      };
+      return {
+        setTimeout: wrap("setTimeout", nat),
+        setInterval: wrap("setInterval", nint),
+      };
+    }
+
     function apply(ctx) {
       console.log("[backtrack-minimap] apply 开始，注入服务：", inject);
+      const timers = makeTimers(ctx);
       try {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), "conversation-backtrack-minimap: dictionaries");
       } catch (err) {
         console.error("[backtrack-minimap] locale 注册失败", err);
       }
       const t = ctx.locale.bind(NS);
-      const injected = () => ({ t, settings: settingsStore });
+      const injected = () => ({ t, settings: settingsStore, timers });
 
       try {
         ctx.slots.inject("settings.section", () =>

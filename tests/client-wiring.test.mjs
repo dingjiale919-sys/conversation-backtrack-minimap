@@ -26,7 +26,7 @@ assert.ok(captured);
 const api = captured.factory((id) => ({ react: React }[id]));
 
 assert.equal(api.NS, "conversationBacktrackMinimap");
-assert.deepEqual(api.inject, ["slots", "locale"]);
+assert.deepEqual(api.inject, ["slots", "locale", "timer"]);
 assert.deepEqual(api.__selectors, {
   scroll: "[data-conversation-scroll]",
   row: "[data-chat-anchor-key]",
@@ -38,6 +38,8 @@ const registrations = [];
 const mockCtx = {
   effect: (fn) => fn(),
   get: (key) => (key === "remote.opencodeUsage" ? {} : undefined),
+  setTimeout: (cb) => cb(),
+  setInterval: () => () => {},
   locale: { register: () => {}, bind: () => (k) => k },
   slots: {
     inject: (slotName, cb) => registrations.push([slotName, cb]),
@@ -64,5 +66,7 @@ assert.equal(typeof share.t, "function");
 assert.equal(typeof share.settings.get, "function");
 assert.equal(typeof share.settings.update, "function");
 assert.equal(typeof share.settings.subscribe, "function");
+assert.equal(typeof share.timers.setTimeout, "function");
+assert.equal(typeof share.timers.setInterval, "function");
 
 console.log("client wiring tests passed");
