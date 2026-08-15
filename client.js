@@ -1071,24 +1071,67 @@ window.__ModuleLoader__.load({
 
     // ═══════════════════════════ React 组件 ═══════════════════════════
 
+    /** 会话快照订阅（XiLuovo 验证过的路径：sessions.binding(id).session）。 */
+    function useSessionSnapshot(sessions, sessionId) {
+      const [snap, setSnap] = React.useState(null);
+      React.useEffect(() => {
+        if (!sessionId || !sessions) {
+          setSnap(null);
+          return;
+        }
+        let face = null;
+        try {
+          const binding = sessions.binding(sessionId);
+          face = binding ? binding.session : null;
+        } catch {
+          face = null;
+        }
+        if (!face) {
+          setSnap(null);
+          return;
+        }
+        try {
+          setSnap(face.getSnapshot());
+          return face.subscribe(() => setSnap(face.getSnapshot()));
+        } catch {
+          setSnap(null);
+        }
+      }, [sessions, sessionId]);
+      return snap;
+    }
+
     /** 输入栏槽位条目：本身不渲染可见内容，只负责创建/销毁命令式时间轴。 */
     function RailEntry(props) {
-      const { sessionId, useSession, t, settings, timers } = props;
+      const { sessionId, useSession, useSessions, t, settings, timers, sessions } = props;
       // 设置是 store 对象：用 useSyncExternalStore 取当前值快照。
       const values =
         settings && typeof settings.get === "function"
           ? React.useSyncExternalStore(settings.subscribe, settings.get)
           : { ...DEFAULTS };
-      const snapshot = typeof useSession === "function" ? useSession((s) => (s ? s.chat : null)) : null;
+      const currentId = typeof useSessions === "function" ? useSessions((s) => (s ? s.current : sessionId)) : sessionId;
+      const svcSnap = useSessionSnapshot(sessions, currentId);
+      // 优先 sessions 服务路径；不可用时回退槽位标准 prop useSession。
+      const propChat = typeof useSession === "function" ? useSession((s) => (s ? s.chat : null)) : null;
+      const snapshot = svcSnap ? svcSnap : propChat ? { chat: propChat } : null;
       // 用 order 签名（长度+首尾 key）作 memo 依赖：流式期间内容变化不重算索引，
       // 只有节点增删（含 loadOlder 在头部追加）才重建条目列表。
-      const order = snapshot ? snapshot.order : null;
+      const order = snapshot && snapshot.chat ? snapshot.chat.order : null;
       const orderSig = order
         ? order.length + ":" + order[0] + ":" + order[order.length - 1]
         : "0";
       const snapshotRef = React.useRef(snapshot);
       snapshotRef.current = snapshot;
       const entries = React.useMemo(() => entriesOf(snapshotRef.current), [orderSig]);
+      const lastEntryLen = React.useRef(-1);
+      if (lastEntryLen.current !== entries.length) {
+        lastEntryLen.current = entries.length;
+        console.log(
+          "[backtrack-minimap] 快照来源：" +
+            (svcSnap ? "sessions服务" : propChat ? "useSession prop" : "无") +
+            "，entries=" +
+            entries.length
+        );
+      }
       const rootRef = React.useRef(null);
       const railRef = React.useRef(null);
       const [unsupported, setUnsupported] = React.useState(false);
@@ -1132,14 +1175,14 @@ window.__ModuleLoader__.load({
           setBadge("red");
           return;
         }
-        // 先挂回调再送条目，避免首轮 rebuildRows 时回调还没就位。
+        // 先挂回调、先置蓝，再送条目——layout 里的 onRowsChanged 会把蓝升成绿。
         rail.onRowsChanged = (count) => {
           if (count > 0) setBadge("green");
           else setBadge("blue");
         };
+        setBadge("blue");
         rail.setEntries(entries);
         railRef.current = rail;
-        setBadge("blue");
         return () => {
           railRef.current = null;
           rail.dispose();
@@ -1352,13 +1395,22 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       console.log("[backtrack-minimap] apply 开始，注入服务：", inject);
       const timers = makeTimers(ctx);
+      // 会话数据服务：XiLuovo/dsh-session-timeline 验证过的路径
+      // （ctx.get('sessions') → sessions.binding(sessionId).session）。
+      let sessions = null;
+      try {
+        sessions = ctx.get("sessions");
+      } catch {
+        sessions = null;
+      }
+      console.log("[backtrack-minimap] sessions 服务：", sessions ? "已取得" : "不可用");
       try {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), "conversation-backtrack-minimap: dictionaries");
       } catch (err) {
         console.error("[backtrack-minimap] locale 注册失败", err);
       }
       const t = ctx.locale.bind(NS);
-      const injected = () => ({ t, settings: settingsStore, timers });
+      const injected = () => ({ t, settings: settingsStore, timers, sessions });
 
       try {
         ctx.slots.inject("settings.section", () =>
