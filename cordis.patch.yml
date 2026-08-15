@@ -1,0 +1,6 @@
+# 安装为 profile layer 时自动应用的补丁：插入插件行。
+# 手动安装方式（不用 dsh plugin add）等价于把下面这一行加进
+# $DSH_HOME/profiles/web/cordis.patch.yml 的 insert 列表。
+- insert:
+    - id: conversation-backtrack-minimap
+      name: 'conversation-backtrack-minimap'
