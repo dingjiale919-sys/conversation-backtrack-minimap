@@ -438,6 +438,7 @@ window.__ModuleLoader__.load({
         this.mo = null;
         this.ro = null;
         this.column = null;
+        this.baseTop = 0;
         this.onChange = null;
         this.pollDisposer = null;
         this.debugN = 0;
@@ -528,6 +529,13 @@ window.__ModuleLoader__.load({
           }
         }
         this.order = Array.from(rows, (r) => r.getAttribute("data-chat-anchor-key")).filter((k) => k != null);
+        // 首行在滚动容器内容坐标里的原点偏移：列上方有内边距/标题等，
+        // 跳转定位必须加上这个偏移才能精确居中。
+        if (rows.length > 0) {
+          const sr = this.scrollport.getBoundingClientRect();
+          const rr = rows[0].getBoundingClientRect();
+          this.baseTop = rr.top - sr.top + this.scrollport.scrollTop;
+        }
         this.schedule();
       }
 
@@ -552,8 +560,10 @@ window.__ModuleLoader__.load({
       }
 
       recompute() {
+        // tops 是相对滚动容器内容原点的坐标（含列上方内边距/标题偏移），
+        // 与 scrollTop 同坐标系，跳转定位才能精确居中。
         const tops = new Array(this.order.length);
-        let top = 0;
+        let top = this.baseTop || 0;
         for (let i = 0; i < this.order.length; i++) {
           tops[i] = top;
           top += this.heights.get(this.order[i]) || 0;
