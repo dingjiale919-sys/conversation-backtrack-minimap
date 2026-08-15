@@ -762,10 +762,11 @@ window.__ModuleLoader__.load({
         const gap = st.settings.density === "aggressive" ? 6 : st.settings.density === "adaptive" ? 3 : 0;
         const railH = rail.clientHeight || 1;
         const extent = Math.max(1, st.scrollport.scrollHeight - st.scrollport.clientHeight);
-        // 工具显隐在渲染层处理：保留原始条目索引，只跳过显示。
+        // 工具显隐与隐藏占位在渲染层处理：保留原始条目索引，只跳过显示。
         const vis = [];
         for (let i = 0; i < st.entries.length; i++) {
           const e = st.entries[i];
+          if (e.hidden) continue;
           if (e.role === "tool" && st.settings.showToolCalls === false) continue;
           vis.push(i);
         }
@@ -1050,10 +1051,44 @@ window.__ModuleLoader__.load({
       st.resizeObserver.observe(st.scrollport);
       st.tracker.start(() => layout());
 
-      st.setEntries = (entries) => {
-        st.entries = entries;
+      st.setEntries = (rawEntries) => {
+        // 以 DOM 行顺序为准重排条目，并给快照缺失的 key 补占位（hidden 标记）：
+        // 保证 entries.length === tracker.order.length，entries[i].key 与
+        // tracker.order[i]（及 tops[i]）严格一一对应，中段不一致也不会错位。
+        const byKey = new Map(rawEntries.map((e) => [e.key, e]));
+        const aligned = [];
+        const missing = [];
+        for (const k of st.tracker.order) {
+          const e = byKey.get(k);
+          if (e) {
+            aligned.push(e);
+          } else {
+            missing.push(String(k).slice(0, 30));
+            aligned.push({
+              key: k,
+              kind: "unknown",
+              role: "system",
+              turn: undefined,
+              seq: 0,
+              time: undefined,
+              preview: "",
+              chars: 0,
+              hidden: true,
+            });
+          }
+        }
+        st.entries = aligned;
         st.tops = st.tracker.tops;
         st.heights = st.tracker.heights;
+        // 诊断：DOM 里有、快照里没有的 key（头尾已对齐，差异应在中段）。
+        if (missing.length > 0 && (st.setEntriesLogs = (st.setEntriesLogs || 0) + 1) <= 3) {
+          console.log(
+            "[backtrack-minimap] DOM 中不在快照的 key 数=" +
+              missing.length +
+              "，样例=" +
+              JSON.stringify(missing.slice(0, 6))
+          );
+        }
         layout();
       };
 
