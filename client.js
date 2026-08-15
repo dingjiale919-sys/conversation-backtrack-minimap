@@ -440,7 +440,12 @@ window.__ModuleLoader__.load({
 
       start(onChange) {
         this.onChange = onChange;
+        this.debugN = 0;
+        const dbg = (msg, val) => {
+          if (this.debugN++ < 8) console.log("[backtrack-minimap][geo] " + msg, val);
+        };
         this.refreshColumn();
+        dbg("start: column=", this.column ? "有" : "无");
         // 单个 subtree MutationObserver 兜底：列容器尚未挂载（空会话）、
         // loadOlder 头部追加、新消息尾部插入都能被发现；只对"与消息行相关"
         // 的 childList 变更做 O(行数) 重扫，流式文本更新不触发重扫。
@@ -450,6 +455,7 @@ window.__ModuleLoader__.load({
             for (const added of rec.addedNodes) {
               if (added.nodeType !== 1) continue;
               if (added.matches(SELECTORS.row) || added.querySelector(SELECTORS.row)) {
+                dbg("MO 发现消息行插入，rescan");
                 this.rescan();
                 return;
               }
@@ -459,6 +465,20 @@ window.__ModuleLoader__.load({
         this.mo.observe(this.scrollport, { childList: true, subtree: true });
         this.ro = new ResizeObserver((entries) => this.applyRO(entries));
         this.rescan();
+        // 自愈兜底：若一直没发现行（时序未知），每秒重扫一次，找到即停。
+        this.pollTimer = setInterval(() => {
+          if (this.rowEls.size > 0) {
+            clearInterval(this.pollTimer);
+            this.pollTimer = null;
+            return;
+          }
+          dbg("轮询重扫（仍未发现行）");
+          this.rescan();
+        }, 1000);
+        if (this.pollTimer) {
+          const t = this.pollTimer;
+          setTimeout(() => clearInterval(t), 60000);
+        }
       }
 
       refreshColumn() {
@@ -468,8 +488,12 @@ window.__ModuleLoader__.load({
 
       rescan() {
         this.refreshColumn();
-        if (!this.column) return;
+        if (!this.column) {
+          if (this.debugN++ < 8) console.log("[backtrack-minimap][geo] rescan: 未找到列容器");
+          return;
+        }
         const rows = this.column.querySelectorAll(SELECTORS.row);
+        if (this.debugN++ < 8) console.log("[backtrack-minimap][geo] rescan: 行数=" + rows.length);
         const seen = new Set();
         for (const row of rows) {
           const key = row.getAttribute("data-chat-anchor-key");
@@ -527,6 +551,10 @@ window.__ModuleLoader__.load({
       }
 
       stop() {
+        if (this.pollTimer) {
+          clearInterval(this.pollTimer);
+          this.pollTimer = null;
+        }
         if (this.mo) this.mo.disconnect();
         if (this.ro) this.ro.disconnect();
         this.mo = this.ro = null;
@@ -742,6 +770,7 @@ window.__ModuleLoader__.load({
         const narrow = sr.width < 480;
         const hidden = narrow || !st.tracker.rowEls.size;
         rail.style.display = hidden ? "none" : "block";
+        if (st.onRowsChanged) st.onRowsChanged(st.tracker.rowEls.size);
         if (hidden) return;
         // 内容列左缘：以第一条可见消息行的实际左缘为准（版本无关）。
         let contentLeft = sr.left;
@@ -1062,14 +1091,14 @@ window.__ModuleLoader__.load({
           setBadge("red");
           return;
         }
-        rail.setEntries(entries);
-        railRef.current = rail;
-        setBadge("blue");
-        // 行出现后升为 green：由 rail 的 onRowsChanged 回调触发。
+        // 先挂回调再送条目，避免首轮 rebuildRows 时回调还没就位。
         rail.onRowsChanged = (count) => {
           if (count > 0) setBadge("green");
           else setBadge("blue");
         };
+        rail.setEntries(entries);
+        railRef.current = rail;
+        setBadge("blue");
         return () => {
           railRef.current = null;
           rail.dispose();
