@@ -147,7 +147,7 @@ window.__ModuleLoader__.load({
     function assistantTextOf(data) {
       let out = "";
       for (const b of (data && data.blocks) || []) {
-        if (b && (b.kind === "text" || b.kind === "reasoning") && typeof b.text === "string") out += " " + b.text;
+        if (b && b.kind === "text" && typeof b.text === "string") out += " " + b.text;
       }
       return out.replace(/\s+/g, " ").trim();
     }
@@ -636,6 +636,31 @@ window.__ModuleLoader__.load({
       return offset;
     }
 
+    /** 测量"粘在底部"的 sticky 元素高度（如对话输入栏），跳转居中时从视口高度中扣除。 */
+    let bottomStickyCache = { at: 0, value: 0 };
+    function measureBottomStickyOffset(scrollport) {
+      const now = Date.now();
+      if (now - bottomStickyCache.at < 500) return bottomStickyCache.value;
+      let offset = 0;
+      const rect = scrollport.getBoundingClientRect();
+      for (const el of scrollport.querySelectorAll("*")) {
+        let pos;
+        try {
+          pos = getComputedStyle(el).position;
+        } catch {
+          continue;
+        }
+        if (pos === "sticky") {
+          const r = el.getBoundingClientRect();
+          if (r.bottom >= rect.bottom - 8 && r.top < rect.bottom) {
+            offset = Math.max(offset, r.height);
+          }
+        }
+      }
+      bottomStickyCache = { at: now, value: offset };
+      return offset;
+    }
+
     /**
      * 命令式时间轴手柄：创建 fixed rail、视口亮带、悬停预览，绑定全部事件，
      * dispose() 一次性清理（监听器/观察器/DOM），不留残留。
@@ -891,10 +916,26 @@ window.__ModuleLoader__.load({
       function jumpTo(index) {
         if (index < 0 || index >= st.tops.length) return;
         const sp = st.scrollport;
-        const h = st.heights.get(st.entries[index].key) || 0;
+        const key = st.entries[index].key;
+        const el = st.tracker.rowEls.get(key);
+        // 以点击时刻的实时几何为准：前缀和 tops 可能滞后于行高变化（流式/展开/收起），
+        // 实时量取目标行的内容坐标与高度，避免落点偏上/偏下。
+        let top;
+        let h;
+        if (el && el.isConnected) {
+          const spRect = sp.getBoundingClientRect();
+          const r = el.getBoundingClientRect();
+          top = r.top - spRect.top + sp.scrollTop;
+          h = r.height || (st.heights.get(key) || 0);
+        } else {
+          top = st.tops[index];
+          h = st.heights.get(key) || 0;
+        }
         const sticky = measureStickyOffset(sp);
+        // 底部 sticky 覆盖区（输入栏）不属于可见居中区，从视口高度中扣除。
+        const viewH = Math.max(0, sp.clientHeight - measureBottomStickyOffset(sp));
         const target = clamp(
-          st.tops[index] - (sp.clientHeight - h) / 2 + sticky,
+          top - (viewH - h) / 2 + sticky,
           0,
           Math.max(0, sp.scrollHeight - sp.clientHeight)
         );

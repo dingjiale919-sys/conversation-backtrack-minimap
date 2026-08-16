@@ -60,7 +60,7 @@ function node(key, kind, data, extra) {
   assert.equal(all[0].preview, "你好 世界");
   assert.equal(all[0].turn, 1, "用户消息应归属其后第一条已知 turn");
   assert.equal(all[1].role, "assistant");
-  assert.equal(all[1].preview, "回答一 思考");
+  assert.equal(all[1].preview, "回答一", "预览只取正文,思考块不混入");
   assert.equal(all[1].turn, 1);
   assert.equal(all[2].role, "tool");
   assert.equal(all[4].turn, 2);
